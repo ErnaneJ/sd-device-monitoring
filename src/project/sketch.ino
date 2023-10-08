@@ -10,27 +10,30 @@
 //====================================== START - PROJECT SETTINGS ===================================== //
 
 #define OUTPUT_SERIAL_SENSOR_DATA 0
+int SAMPPLING         = 1;
+int CURRENT_SCREEN    = 0; // default screen 
+int TEMP_UNIT_OPTION  = 0; // 0 = C ; 1 = F ; 2 = K
+float MAX_TEMP    =  80.0;
+float MIN_TEMP    = -40.0;
+float MAX_HUM     = 100.0;
+float MIN_HUM      =  0.0;
 
-int CURRENT_SCREEN = 0; // default screen 
-int TEMP_UNIT_OPTION = 0; // 0 = C ; 1 = F ; 2 = K
-float MAX_TEMP = 80.0;
-float MIN_TEMP = -40.0;
-float MAX_HUM = 100.0;
-float MIN_HUM = 0.0;
+#define SCREEN_HOME      0
+#define SCREEN_SETUP     1
+#define SCREEN_TEMP      2
+#define SCREEN_MIN_TEMP  3
+#define SCREEN_MAX_TEMP  4
+#define SCREEN_HUM       5
+#define SCREEN_MIN_HUM   6
+#define SCREEN_MAX_HUM   7
+#define SCREEN_TUNIT     8
+#define SCREEN_SAMPPLING 9
+#define SCREEN_WARN     10
+#define SCREEN_WARN_TEMP 11
 
-#define SCREEN_HOME     0
-#define SCREEN_SETUP    1
-#define SCREEN_TEMP     2
-#define SCREEN_MIN_TEMP 3
-#define SCREEN_MAX_TEMP 4
-#define SCREEN_HUM      5
-#define SCREEN_MIN_HUM  6
-#define SCREEN_MAX_HUM  7
-#define SCREEN_TUNIT    8
-
-#define TEMP_CELSIUS    0
-#define TEMP_FAHRENHEIT 1
-#define TEMP_KELVIN     2
+#define TEMP_CELSIUS     0
+#define TEMP_FAHRENHEIT  1
+#define TEMP_KELVIN      2
 
 //====================================== END - PROJECT SETTINGS ===================================== //
 
@@ -69,6 +72,7 @@ void response_signal()
 
 void read_sensor_data()
 {
+  turn_on_yellow_led();
   uint8_t RH_high, RH_low, temp_high, temp_low;
   
   signal_sensor();
@@ -88,16 +92,30 @@ void read_sensor_data()
   sensor_temperature = ((temp_high << 8) | temp_low)* 0.1;
 
   if (temp_is_negative) sensor_temperature = -sensor_temperature;
+
+  if(
+    sensor_humidity < MIN_HUM ||
+    sensor_humidity > MAX_HUM ||
+    sensor_temperature < MIN_TEMP ||
+    sensor_temperature > MAX_TEMP
+  ) {
+    CURRENT_SCREEN = SCREEN_WARN_TEMP;
+    update_screen();
+  }
  
   if(OUTPUT_SERIAL_SENSOR_DATA){
     show_sensor_temperature();
     show_sensor_humidity();
     // show_sensor_checksum(RH_high, RH_low, temp_high, temp_low);
+    // Serial.println(" ");
   }
+  
 
-  Serial.println(" ");
+  read_smoke_sensor();
 
   _delay_ms(1000);
+
+  turn_on_green_led();
 }
 
 byte read_DHT22_byte()
@@ -238,7 +256,8 @@ void show_temperature_on_LCD()
   writes_on_LCD(unit);
 }
 
-void show_humidity_on_LCD(){
+void show_humidity_on_LCD()
+{
   char str_humidity[20];
   dtostrf(sensor_humidity, 6, 2, str_humidity);
   
@@ -274,7 +293,7 @@ void setup_buttons()
   sei();
 }
 //====================================== END - BUTTONS ===================================== //
-//====================================== START - SYSTEM LOGIC ===================================== //
+//====================================== START - SCREENS ===================================== //
 
 void show_SCREEN_HOME()
 {
@@ -292,7 +311,7 @@ void show_SCREEN_SETUP()
 
   writes_on_LCD("     SETUP");
   send_command_to_LCD(0XC0, 0);
-  writes_on_LCD("TEMP  HUM  TUNIT");
+  writes_on_LCD("TEMP  HUM   SAMP");
 }
 
 void show_SCREEN_TEMP()
@@ -302,7 +321,7 @@ void show_SCREEN_TEMP()
 
   writes_on_LCD("  TEMPERATURE");
   send_command_to_LCD(0XC0, 0);
-  writes_on_LCD(" MIN        MAX");
+  writes_on_LCD("MIN  T.UNIT  MAX");
 }
 
 void show_SCREEN_MIN_TEMP()
@@ -378,9 +397,8 @@ void show_SCREEN_MIN_HUM()
   send_command_to_LCD(0X01, 0);
   send_command_to_LCD(0X80, 0);
 
-  float aux_hum = MIN_HUM;
   char str_hum[20];
-  dtostrf(aux_hum, 6, 2, str_hum);
+  dtostrf(MIN_HUM, 6, 2, str_hum);
   
   writes_on_LCD("  MIN HUM");
   writes_on_LCD(" (%)");
@@ -395,11 +413,10 @@ void show_SCREEN_MAX_HUM()
   send_command_to_LCD(0X01, 0);
   send_command_to_LCD(0X80, 0);
 
-  float aux_hum = MAX_HUM;
   char str_hum[20];
-  dtostrf(aux_hum, 6, 2, str_hum);
+  dtostrf(MAX_HUM, 6, 2, str_hum);
   
-  writes_on_LCD("  MAX TEMP");
+  writes_on_LCD("  MAX HUM");
   writes_on_LCD(" (%)");
   send_command_to_LCD(0XC0, 0);
   writes_on_LCD("  + (");
@@ -415,6 +432,59 @@ void show_SCREEN_TUNIT()
   writes_on_LCD("   TEMP UNIT");
   send_command_to_LCD(0XC0, 0);
   writes_on_LCD("(F)    (C)   (K)");
+}
+
+void show_SCREEN_SAMPPLING()
+{
+  send_command_to_LCD(0X01, 0);
+  send_command_to_LCD(0X80, 0);
+
+  char str_samp[20];
+  dtostrf(SAMPPLING, 1,0, str_samp);
+  
+  writes_on_LCD("   SAMPPLING");
+  send_command_to_LCD(0XC0, 0);
+  writes_on_LCD("  +  (");
+  writes_on_LCD(str_samp);
+  writes_on_LCD("s)  -");
+}
+
+void show_SCREEN_WARN_FIRE()
+{
+  turn_on_red_led();
+  send_command_to_LCD(0X01, 0);
+  send_command_to_LCD(0X80, 0);
+  writes_on_LCD("!!!!WARNING!!!!!");
+  send_command_to_LCD(0XC0, 0);
+  writes_on_LCD("!!!!!!FIRE!!!!!!");
+}
+
+void show_SCREEN_WARN_TEMP()
+{
+  turn_on_red_led();
+ 
+  float aux_temp = sensor_temperature;
+  char unit[2]; unit[0] = 'C'; unit[1] = '\0';
+  
+  if(TEMP_UNIT_OPTION == TEMP_FAHRENHEIT){
+    aux_temp = (sensor_temperature * (9.0/5.0)) + 32;
+    unit[0] = 'F';
+  }else if (TEMP_UNIT_OPTION == TEMP_KELVIN){
+    aux_temp = sensor_temperature + 273.15;
+    unit[0] = 'K';
+  }
+
+  char str_temperatura[20];
+  dtostrf(aux_temp, 6, 2, str_temperatura);
+  
+  send_command_to_LCD(0X01, 0);
+  send_command_to_LCD(0X80, 0);
+  writes_on_LCD("   !WARN TEMP!");
+  send_command_to_LCD(0XC0, 0);
+  writes_on_LCD("=== ");
+  writes_on_LCD(str_temperatura);
+  writes_on_LCD(unit);
+  writes_on_LCD(" ====");
 }
 
 void start_project()
@@ -433,6 +503,7 @@ void start_project()
 
 void show_error()
 {
+  turn_on_red_led();
   send_command_to_LCD(0X01, 0);
   send_command_to_LCD(0X80, 0);
 
@@ -443,8 +514,6 @@ void show_error()
 
 void update_screen()
 {
-  Serial.print("Update screen to ");
-  Serial.println(CURRENT_SCREEN);
   switch(CURRENT_SCREEN){
     case SCREEN_HOME:
       show_SCREEN_HOME();
@@ -473,14 +542,98 @@ void update_screen()
     case SCREEN_MAX_HUM:
       show_SCREEN_MAX_HUM();
       break;
+    case SCREEN_SAMPPLING:
+      show_SCREEN_SAMPPLING();
+      break;
+    case SCREEN_WARN:
+      show_SCREEN_WARN_FIRE();
+      break;
+    case SCREEN_WARN_TEMP:
+      show_SCREEN_WARN_TEMP();
+      break;
     default:
       show_error();
       break;
   }
 }
 
-//====================================== END - SYSTEM LOGIC ===================================== //
+//====================================== END - SCREENS ============================================== //
+//====================================== START - SMOKE DETECTOR ===================================== //
+
+#define LIMIT_SMOKE_INDEX 90
+float SMOKE_INDEX = 0;
+
+void smoke_sensor_setup(){
+  ADMUX = 0; // 0x40;
+  ADCSRA = (1 << ADEN);
+
+  clear_bit(DDRH, PH3);
+}
+
+void read_smoke_sensor(){
+  ADMUX = (ADMUX & 0xF8);
+  ADCSRA |= (1 << ADSC);
+  while (ADCSRA & (1 << ADSC));
+  SMOKE_INDEX = (ADC / 1023.0) * 100.0;;
+
+  if(SMOKE_INDEX >= LIMIT_SMOKE_INDEX){
+    CURRENT_SCREEN = SCREEN_WARN;
+    update_screen();
+    set_bit(PINH, PH3);
+    // tone(6, 100); // for simulation
+  }else{
+    clear_bit(PINH, PH3);
+    // noTone(6); // for simulation
+  }
+}
+
+//====================================== END - SMOKE DETECTOR ===================================== //
+
+//====================================== START - LEDS ===================================== //
+#define LED_GREEN_PIN PE4
+#define LED_YELLOW_PIN PE5
+#define LED_RED_PIN PG5
+
+void leds_setup(){
+  clear_bit(DDRE, LED_GREEN_PIN);
+  clear_bit(DDRE, LED_YELLOW_PIN);
+  clear_bit(DDRG, LED_RED_PIN);
+}
+
+void turn_on_green_led(){
+  set_bit(PORTE, LED_GREEN_PIN);
+  clear_bit(PORTE, LED_YELLOW_PIN);
+  clear_bit(PORTG, LED_RED_PIN);
+}
+
+void turn_on_yellow_led(){
+  clear_bit(PORTE, LED_GREEN_PIN);
+  set_bit(PORTE, LED_YELLOW_PIN);
+  clear_bit(PORTG, LED_RED_PIN);
+}
+
+void turn_on_red_led(){
+  clear_bit(PORTE, LED_GREEN_PIN);
+  clear_bit(PORTE, LED_YELLOW_PIN);
+  set_bit(PORTG, LED_RED_PIN);
+}
+
+void turn_on_all_leds(){
+  set_bit(PORTE, LED_GREEN_PIN);
+  set_bit(PORTE, LED_YELLOW_PIN);
+  set_bit(PORTG, LED_RED_PIN);
+}
+
+void turn_off_all_leds(){
+  clear_bit(PORTE, LED_GREEN_PIN);
+  clear_bit(PORTE, LED_YELLOW_PIN);
+  clear_bit(PORTG, LED_RED_PIN);
+}
+
+//====================================== END - LEDS ===================================== //
+
 //====================================== Start - Main method ============================================ //
+
 
 int main(void)
 {
@@ -488,14 +641,21 @@ int main(void)
 
   DDRH = 0xFF; DDRB = 0xFF; // B and H registers are digital outputs by default.
 
+  leds_setup();
+  turn_on_all_leds();
+  
+  smoke_sensor_setup();
   initialize_LCD();
-  read_sensor_data();
+  signal_sensor();
   setup_buttons();
   start_project();
+  turn_on_green_led();
 
   while(1){
     read_sensor_data();
-    _delay_ms(1000);
+    for(int i = 0; i < SAMPPLING; i++){
+      _delay_ms(1000);
+    }
 
     if(CURRENT_SCREEN == SCREEN_HOME) update_screen();
   }
@@ -526,20 +686,27 @@ ISR(INT2_vect) { // LEFT
       CURRENT_SCREEN = SCREEN_MIN_TEMP;
       break;
     case SCREEN_MIN_TEMP:
-      if (MIN_TEMP < 79.9) MIN_TEMP += 0.1;
+      if (MIN_TEMP < 80.0) MIN_TEMP += 0.1;
       break;
     case SCREEN_MAX_TEMP:
-      if (MAX_TEMP < 79.9) MAX_TEMP += 0.1;
+      if (MAX_TEMP < 80.0) MAX_TEMP += 0.1;
       break;
     case SCREEN_HUM:
       if (!test_bit(PIND, PD2)) return;
       CURRENT_SCREEN = SCREEN_MIN_HUM;
       break;
     case SCREEN_MIN_HUM:
-      if (MIN_HUM < 99.9) MIN_HUM += 0.1;
+      if (MIN_HUM < 100.00) MIN_HUM += 0.1;
       break;
     case SCREEN_MAX_HUM:
-      if (MAX_HUM < 99.9) MAX_HUM += 0.1;
+      if (MAX_HUM < 100.00) MAX_HUM += 0.1;
+      break;
+    case SCREEN_SAMPPLING:
+      SAMPPLING += 1;
+      break;
+    case SCREEN_WARN:
+    case SCREEN_WARN_TEMP:
+      CURRENT_SCREEN = SCREEN_HOME;
       break;
     default:
       break;
@@ -562,12 +729,17 @@ ISR(INT0_vect) { // CENTER
       TEMP_UNIT_OPTION = TEMP_CELSIUS;
       CURRENT_SCREEN = SCREEN_HOME;
       break;
+    case SCREEN_TEMP:
+      CURRENT_SCREEN = SCREEN_TUNIT;
+      break;
     case SCREEN_MIN_TEMP:
     case SCREEN_MAX_TEMP:
-    case SCREEN_TEMP:
     case SCREEN_MIN_HUM:
     case SCREEN_MAX_HUM:
+    case SCREEN_SAMPPLING:
     case SCREEN_HUM:
+    case SCREEN_WARN:
+    case SCREEN_WARN_TEMP:
       CURRENT_SCREEN = SCREEN_HOME;
       break;
     case SCREEN_SETUP:
@@ -588,7 +760,7 @@ ISR(INT1_vect) { // RIGHT
   switch (CURRENT_SCREEN) {
     case SCREEN_SETUP:
       if (!test_bit(PIND, PD1)) return; // Botão pressionado
-      CURRENT_SCREEN = SCREEN_TUNIT;
+      CURRENT_SCREEN = SCREEN_SAMPPLING;
       break;
     case SCREEN_TUNIT:
       if (!test_bit(PIND, PD1)) return; // Botão pressionado
@@ -600,10 +772,10 @@ ISR(INT1_vect) { // RIGHT
       CURRENT_SCREEN = SCREEN_MAX_TEMP;
       break;
     case SCREEN_MIN_TEMP:
-      if (MIN_TEMP > -40.1) MIN_TEMP -= 0.1;
+      if (MIN_TEMP > -40.0) MIN_TEMP -= 0.1;
       break;
     case SCREEN_MAX_TEMP:
-      if (MAX_TEMP > -40.1) MAX_TEMP -= 0.1;
+      if (MAX_TEMP > -40.0) MAX_TEMP -= 0.1;
       break;
     case SCREEN_HUM:
       if (!test_bit(PIND, PD1)) return; // Botão pressionado
@@ -614,6 +786,13 @@ ISR(INT1_vect) { // RIGHT
       break;
     case SCREEN_MAX_HUM:
       if (MAX_HUM > 0.1) MAX_HUM -= 0.1;
+      break;
+    case SCREEN_SAMPPLING:
+      if (SAMPPLING > 1) SAMPPLING -= 1;
+      break;
+    case SCREEN_WARN:
+    case SCREEN_WARN_TEMP:
+      CURRENT_SCREEN = SCREEN_HOME;
       break;
     default:
       break;
