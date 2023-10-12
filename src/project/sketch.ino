@@ -1,41 +1,11 @@
 //================================================================================ //
-// Reading sensor data from DHT22 without using a library ans show in display 16x2
+// Reading sensor data from DHT22 without using a library and show in display 16x2
 //================================================================================ //
 
 #define F_CPU 16000000 UL
 
 #include <avr/io.h>
 #include <util/delay.h>
-
-//====================================== START - PROJECT SETTINGS ===================================== //
-
-#define OUTPUT_SERIAL_SENSOR_DATA 0
-int SAMPPLING         = 1;
-int CURRENT_SCREEN    = 0; // default screen 
-int TEMP_UNIT_OPTION  = 0; // 0 = C ; 1 = F ; 2 = K
-float MAX_TEMP    =  80.0;
-float MIN_TEMP    = -40.0;
-float MAX_HUM     = 100.0;
-float MIN_HUM      =  0.0;
-
-#define SCREEN_HOME      0
-#define SCREEN_SETUP     1
-#define SCREEN_TEMP      2
-#define SCREEN_MIN_TEMP  3
-#define SCREEN_MAX_TEMP  4
-#define SCREEN_HUM       5
-#define SCREEN_MIN_HUM   6
-#define SCREEN_MAX_HUM   7
-#define SCREEN_TUNIT     8
-#define SCREEN_SAMPPLING 9
-#define SCREEN_WARN     10
-#define SCREEN_WARN_TEMP 11
-
-#define TEMP_CELSIUS     0
-#define TEMP_FAHRENHEIT  1
-#define TEMP_KELVIN      2
-
-//====================================== END - PROJECT SETTINGS ===================================== //
 
 //============== Macro definitions for working with bits ======================== // 
 #define set_bit(y, bit)(y |= (1 << bit))    // sets the x bit of the variable Y to 1
@@ -44,13 +14,60 @@ float MIN_HUM      =  0.0;
 #define test_bit(y, bit)(y & (1 << bit))    // returns 0 or 1 depending on the bit reading
 //================================================================================ //
 
+//====================================== START - PROJECT SETTINGS ===================================== //
+
+int SAMPPLING            =     1;
+int CURRENT_SCREEN       =     0; // default screen 
+int TEMP_UNIT_OPTION     =     0; // 0 = C ; 1 = F ; 2 = K
+
+float MAX_TEMP           =  80.0;
+float MIN_TEMP           = -40.0;
+float MAX_HUM            = 100.0;
+float MIN_HUM            =   0.0;
+float SMOKE_INDEX        =     0;
+float sensor_humidity    =   0.0; 
+float sensor_temperature =   0.0;
+
+uint8_t sensor_checksum  =   0.0;
+
+#define SCREEN_HOME            0
+#define SCREEN_SETUP           1
+#define SCREEN_TEMP            2
+#define SCREEN_MIN_TEMP        3
+#define SCREEN_MAX_TEMP        4
+#define SCREEN_HUM             5
+#define SCREEN_MIN_HUM         6
+#define SCREEN_MAX_HUM         7
+#define SCREEN_TUNIT           8
+#define SCREEN_SAMPPLING       9
+#define SCREEN_WARN_SMOKE      10
+#define SCREEN_WARN_LIMIT     11
+
+#define DEBUG_SENSOR           0
+
+#define TEMP_CELSIUS           0
+#define TEMP_FAHRENHEIT        1
+#define TEMP_KELVIN            2
+
+#define LIMIT_SMOKE_INDEX     50
+
+#define DHT_PIN              PH4
+#define LED_GREEN_PIN        PE4
+#define LED_YELLOW_PIN       PE5
+#define LED_RED_PIN          PG5
+#define DADOS_LCD          PORTA
+#define NIBBLE_DATA            1 // (PA4-D4, PA5-D5, PA6-D6, PA7-D7)
+#define CONTR_LCD          PORTH
+#define E                    PH6
+#define RS                   PH5
+
+#define LCD_INSTRUCTION        0
+#define LCD_CHARACTER          1
+
+//====================================== END - PROJECT SETTINGS ===================================== //
 //====================================== START - Code For Sensor ===================================== //
-#define DHT_PIN PH4
 
-float sensor_humidity = 0.0, sensor_temperature = 0.0;
-uint8_t sensor_checksum;
-
-void signal_sensor()
+void signal_sensor_dht()
 {
   set_bit(DDRH, DHT_PIN);    // set data pin for o/p
   clear_bit(PORTH, DHT_PIN); // first send low pulse
@@ -62,7 +79,7 @@ void signal_sensor()
   _delay_us(40);
 }
 
-void response_signal()
+void response_dht_signal()
 {
   clear_bit(DDRH, DHT_PIN);        // set data pin for i/p
   while(test_bit(PINH, DHT_PIN));  // wait for low pulse
@@ -70,13 +87,13 @@ void response_signal()
   while(test_bit(PINH, DHT_PIN));  // wait for low pulse
 }
 
-void read_sensor_data()
+void read_dht_sensor_data()
 {
   turn_on_yellow_led();
   uint8_t RH_high, RH_low, temp_high, temp_low;
   
-  signal_sensor();
-  response_signal();
+  signal_sensor_dht();
+  response_dht_signal();
   
   RH_high = read_DHT22_byte();
   RH_low = read_DHT22_byte(); 
@@ -93,29 +110,20 @@ void read_sensor_data()
 
   if (temp_is_negative) sensor_temperature = -sensor_temperature;
 
-  if(
-    sensor_humidity < MIN_HUM ||
-    sensor_humidity > MAX_HUM ||
-    sensor_temperature < MIN_TEMP ||
-    sensor_temperature > MAX_TEMP
-  ) {
-    CURRENT_SCREEN = SCREEN_WARN_TEMP;
-    update_screen();
-  }
+  check_sensor_informations();
  
-  if(OUTPUT_SERIAL_SENSOR_DATA){
+  #if DEBUG_SENSOR == 1
     show_sensor_temperature();
     show_sensor_humidity();
-    // show_sensor_checksum(RH_high, RH_low, temp_high, temp_low);
-    // Serial.println(" ");
-  }
-  
-
-  read_smoke_sensor();
+    show_sensor_checksum(RH_high, RH_low, temp_high, temp_low);
+    Serial.println(" ");
+  #endif
 
   _delay_ms(1000);
 
-  turn_on_green_led();
+  if(CURRENT_SCREEN != SCREEN_WARN_SMOKE && CURRENT_SCREEN != SCREEN_WARN_LIMIT){
+    turn_on_green_led();
+  }
 }
 
 byte read_DHT22_byte()
@@ -162,19 +170,34 @@ void show_sensor_checksum(uint8_t RH_high, uint8_t RH_low, uint8_t temp_high, ui
   }
 }
 
+void check_sensor_informations()
+{
+  if(
+    (sensor_humidity < MIN_HUM || sensor_humidity > MAX_HUM ||
+    sensor_temperature < MIN_TEMP || sensor_temperature > MAX_TEMP) 
+    && (CURRENT_SCREEN == SCREEN_HOME || CURRENT_SCREEN == SCREEN_WARN_LIMIT)
+  ) {
+    CURRENT_SCREEN = SCREEN_WARN_LIMIT;
+    update_screen();
+  }else if(CURRENT_SCREEN == SCREEN_WARN_LIMIT){
+    CURRENT_SCREEN = SCREEN_HOME;
+    update_screen();
+  }
+}
+
 //====================================== END - Code For Sensor ===================================== //
 //====================================== START - Code For LCD ===================================== //
 
-#define DADOS_LCD PORTA
-#define nibble_dados 1 // (PA4-D4, PA5-D5, PA6-D6, PA7-D7)
-#define CONTR_LCD PORTH
-#define E PH6
-#define RS PH5
-
-#define LCD_INSTRUCTION 0
-#define LCD_CHARACTER 1
-
-#define pulso_enable() _delay_us(1); set_bit(CONTR_LCD, E); _delay_us(1); clear_bit(CONTR_LCD, E); _delay_us(45);
+void pulso_enable()
+{
+  _delay_us(1);
+  
+  set_bit(CONTR_LCD, E);
+  _delay_us(1);
+  
+  clear_bit(CONTR_LCD, E);
+  _delay_us(45);
+}
 
 void send_command_to_LCD(unsigned char c, char type) 
 {
@@ -182,7 +205,7 @@ void send_command_to_LCD(unsigned char c, char type)
   if (type == LCD_CHARACTER) set_bit(CONTR_LCD, RS);     // command is character
 
   // ============== First data nibble - 4 MSB
-  if(nibble_dados){
+  if(NIBBLE_DATA){
     DADOS_LCD = (DADOS_LCD & 0x0F) | (0xF0 & c);
   }else{
     DADOS_LCD = (DADOS_LCD & 0xF0) | (c >> 4);
@@ -191,7 +214,7 @@ void send_command_to_LCD(unsigned char c, char type)
   pulso_enable();
 
   // ============== Second data nibble - 4 LSB
-  if(nibble_dados){
+  if(NIBBLE_DATA){
     DADOS_LCD = (DADOS_LCD & 0x0F) | (0xF0 & (c << 4));
   }else{
     DADOS_LCD = (DADOS_LCD & 0xF0) | (0x0F & c);
@@ -210,7 +233,7 @@ void initialize_LCD()
   _delay_ms(20);
 
   // ============== First data nibble - 4 MSB
-  if(nibble_dados){
+  if(NIBBLE_DATA){
     DADOS_LCD = (DADOS_LCD & 0x0F) | 0x30;
   }else{
     DADOS_LCD = (DADOS_LCD & 0xF0) | 0x03;
@@ -219,7 +242,7 @@ void initialize_LCD()
   pulso_enable(); _delay_ms(5); pulso_enable(); _delay_us(200); pulso_enable(); 
 
   // ============== Second data nibble - 4 MSB
-  if(nibble_dados){
+  if(NIBBLE_DATA){
     DADOS_LCD = (DADOS_LCD & 0x0F) | 0x20;
   }else{
     DADOS_LCD = (DADOS_LCD & 0xF0) | 0x02;
@@ -233,7 +256,10 @@ void initialize_LCD()
   send_command_to_LCD(0x80, 0); // initializes cursor in the first position on the left - 1st line
 }
 
-void writes_on_LCD(char * c) { for (;* c != 0; c++) send_command_to_LCD( * c, 1); }
+void writes_on_LCD(char * c)
+{ 
+  for (;* c != 0; c++) send_command_to_LCD( * c, 1); 
+}
 
 void show_temperature_on_LCD()
 {
@@ -248,11 +274,11 @@ void show_temperature_on_LCD()
     unit[0] = 'K';
   }
 
-  char str_temperatura[20];
-  dtostrf(aux_temp, 6, 2, str_temperatura);
+  char str_temperature[20];
+  dtostrf(aux_temp, 6, 2, str_temperature);
   
   writes_on_LCD("Temp:    ");
-  writes_on_LCD(str_temperatura);
+  writes_on_LCD(str_temperature);
   writes_on_LCD(unit);
 }
 
@@ -340,8 +366,8 @@ void show_SCREEN_MIN_TEMP()
     unit[0] = 'K';
   }
 
-  char str_temperatura[20];
-  dtostrf(aux_temp, 6, 2, str_temperatura);
+  char str_temperature[20];
+  dtostrf(aux_temp, 6, 2, str_temperature);
   
   writes_on_LCD("  MIN TEMP");
   writes_on_LCD(" (");
@@ -349,7 +375,7 @@ void show_SCREEN_MIN_TEMP()
   writes_on_LCD(")");
   send_command_to_LCD(0XC0, 0);
   writes_on_LCD("  + (");
-  writes_on_LCD(str_temperatura);
+  writes_on_LCD(str_temperature);
   writes_on_LCD(") -");
 }
 
@@ -369,8 +395,8 @@ void show_SCREEN_MAX_TEMP()
     unit[0] = 'K';
   }
 
-  char str_temperatura[20];
-  dtostrf(aux_temp, 6, 2, str_temperatura);
+  char str_temperature[20];
+  dtostrf(aux_temp, 6, 2, str_temperature);
   
   writes_on_LCD("  MAX TEMP");
   writes_on_LCD(" (");
@@ -378,7 +404,7 @@ void show_SCREEN_MAX_TEMP()
   writes_on_LCD(")");
   send_command_to_LCD(0XC0, 0);
   writes_on_LCD("  + (");
-  writes_on_LCD(str_temperatura);
+  writes_on_LCD(str_temperature);
   writes_on_LCD(") -");
 }
 
@@ -449,20 +475,25 @@ void show_SCREEN_SAMPPLING()
   writes_on_LCD("s)  -");
 }
 
-void show_SCREEN_WARN_FIRE()
+void show_SCREEN_WARN_SMOKE()
 {
   turn_on_red_led();
   send_command_to_LCD(0X01, 0);
   send_command_to_LCD(0X80, 0);
-  writes_on_LCD("!!!!WARNING!!!!!");
+
+  char str_smoke[20];
+  dtostrf(SMOKE_INDEX, 6, 2, str_smoke);
+  
+  writes_on_LCD(" SMOKE DETECTED");
   send_command_to_LCD(0XC0, 0);
-  writes_on_LCD("!!!!!!FIRE!!!!!!");
+
+  writes_on_LCD("    ");
+  writes_on_LCD(str_smoke);
+  writes_on_LCD("%");
 }
 
-void show_SCREEN_WARN_TEMP()
-{
-  turn_on_red_led();
- 
+void show_SCREEN_WARN_LIMIT()
+{ 
   float aux_temp = sensor_temperature;
   char unit[2]; unit[0] = 'C'; unit[1] = '\0';
   
@@ -474,20 +505,28 @@ void show_SCREEN_WARN_TEMP()
     unit[0] = 'K';
   }
 
-  char str_temperatura[20];
-  dtostrf(aux_temp, 6, 2, str_temperatura);
-  
+  char str_temperature[20];
+  dtostrf(aux_temp, 4, 1, str_temperature);
+
+  char str_humidity[20];
+  dtostrf(sensor_humidity, 3, 1, str_humidity);
+
   send_command_to_LCD(0X01, 0);
   send_command_to_LCD(0X80, 0);
-  writes_on_LCD("   !WARN TEMP!");
+  writes_on_LCD(" LIMIT EXCEEDED");
   send_command_to_LCD(0XC0, 0);
-  writes_on_LCD("=== ");
-  writes_on_LCD(str_temperatura);
+  writes_on_LCD("T:");
+  writes_on_LCD(str_temperature);
   writes_on_LCD(unit);
-  writes_on_LCD(" ====");
+  writes_on_LCD(" H: ");
+  writes_on_LCD(str_humidity);
+  writes_on_LCD("%");
+
+  _delay_ms(1000);
+  turn_on_red_led();
 }
 
-void start_project()
+void show_SCREEN_START()
 {
   send_command_to_LCD(0X01, 0);
   send_command_to_LCD(0X80, 0);
@@ -495,6 +534,24 @@ void start_project()
   writes_on_LCD("  ERNANE TECH");
   send_command_to_LCD(0XC0, 0);
   writes_on_LCD("SOLUTIONS .LTDA");
+}
+
+void start_project()
+{
+  DDRH = 0xFF; DDRA = 0xFF; DDRB = 0xFF; // A, B and H registers are digital outputs by default.
+
+  initialize_LCD();
+  show_SCREEN_START();
+  
+  leds_setup();
+  turn_on_all_leds();
+  
+  smoke_sensor_setup();
+  signal_sensor_dht();
+  
+  setup_buttons();
+  
+  turn_on_green_led();
 
   _delay_ms(2000);
 
@@ -545,11 +602,11 @@ void update_screen()
     case SCREEN_SAMPPLING:
       show_SCREEN_SAMPPLING();
       break;
-    case SCREEN_WARN:
-      show_SCREEN_WARN_FIRE();
+    case SCREEN_WARN_SMOKE:
+      show_SCREEN_WARN_SMOKE();
       break;
-    case SCREEN_WARN_TEMP:
-      show_SCREEN_WARN_TEMP();
+    case SCREEN_WARN_LIMIT:
+      show_SCREEN_WARN_LIMIT();
       break;
     default:
       show_error();
@@ -560,107 +617,101 @@ void update_screen()
 //====================================== END - SCREENS ============================================== //
 //====================================== START - SMOKE DETECTOR ===================================== //
 
-#define LIMIT_SMOKE_INDEX 90
-float SMOKE_INDEX = 0;
-
-void smoke_sensor_setup(){
+void smoke_sensor_setup()
+{
   ADMUX = 0; // 0x40;
   ADCSRA = (1 << ADEN);
 
   clear_bit(DDRH, PH3);
 }
 
-void read_smoke_sensor(){
+void read_smoke_sensor()
+{
   ADMUX = (ADMUX & 0xF8);
   ADCSRA |= (1 << ADSC);
   while (ADCSRA & (1 << ADSC));
-  SMOKE_INDEX = (ADC / 1023.0) * 100.0;;
+  SMOKE_INDEX = (ADC / 1023.0) * 100.0;
 
   if(SMOKE_INDEX >= LIMIT_SMOKE_INDEX){
-    CURRENT_SCREEN = SCREEN_WARN;
+    CURRENT_SCREEN = SCREEN_WARN_SMOKE;
     update_screen();
     set_bit(PINH, PH3);
-    // tone(6, 100); // for simulation
+    tone(6, 100); // for simulation
   }else{
     clear_bit(PINH, PH3);
-    // noTone(6); // for simulation
+    noTone(6); // for simulation
+    if(CURRENT_SCREEN == SCREEN_WARN_SMOKE) CURRENT_SCREEN = SCREEN_HOME;
   }
 }
 
 //====================================== END - SMOKE DETECTOR ===================================== //
 
 //====================================== START - LEDS ===================================== //
-#define LED_GREEN_PIN PE4
-#define LED_YELLOW_PIN PE5
-#define LED_RED_PIN PG5
 
-void leds_setup(){
+void leds_setup()
+{
   clear_bit(DDRE, LED_GREEN_PIN);
   clear_bit(DDRE, LED_YELLOW_PIN);
   clear_bit(DDRG, LED_RED_PIN);
 }
 
-void turn_on_green_led(){
+void turn_on_green_led()
+{
   set_bit(PORTE, LED_GREEN_PIN);
   clear_bit(PORTE, LED_YELLOW_PIN);
   clear_bit(PORTG, LED_RED_PIN);
 }
 
-void turn_on_yellow_led(){
+void turn_on_yellow_led()
+{
   clear_bit(PORTE, LED_GREEN_PIN);
   set_bit(PORTE, LED_YELLOW_PIN);
   clear_bit(PORTG, LED_RED_PIN);
 }
 
-void turn_on_red_led(){
+void turn_on_red_led()
+{
   clear_bit(PORTE, LED_GREEN_PIN);
   clear_bit(PORTE, LED_YELLOW_PIN);
   set_bit(PORTG, LED_RED_PIN);
 }
 
-void turn_on_all_leds(){
+void turn_on_all_leds()
+{
   set_bit(PORTE, LED_GREEN_PIN);
   set_bit(PORTE, LED_YELLOW_PIN);
   set_bit(PORTG, LED_RED_PIN);
 }
 
-void turn_off_all_leds(){
+void turn_off_all_leds()
+{
   clear_bit(PORTE, LED_GREEN_PIN);
   clear_bit(PORTE, LED_YELLOW_PIN);
   clear_bit(PORTG, LED_RED_PIN);
 }
 
 //====================================== END - LEDS ===================================== //
-
-//====================================== Start - Main method ============================================ //
-
+//====================================== START - Main method ============================================ //
 
 int main(void)
 {
-  Serial.begin(9600);
+  #if DEBUG_SENSOR == 1
+    Serial.begin(9600);
+  #endif
 
-  DDRH = 0xFF; DDRB = 0xFF; // B and H registers are digital outputs by default.
-
-  leds_setup();
-  turn_on_all_leds();
-  
-  smoke_sensor_setup();
-  initialize_LCD();
-  signal_sensor();
-  setup_buttons();
   start_project();
-  turn_on_green_led();
-
+  
   while(1){
-    read_sensor_data();
-    for(int i = 0; i < SAMPPLING; i++){
-      _delay_ms(1000);
-    }
+    read_dht_sensor_data();
+    read_smoke_sensor();
 
+    for(int i = 0; i < SAMPPLING; i++){ _delay_ms(1000); }
     if(CURRENT_SCREEN == SCREEN_HOME) update_screen();
   }
 
-  Serial.end();
+  #if DEBUG_SENSOR == 1
+    Serial.end();
+  #endif
 
   return 0;
 }
@@ -668,7 +719,8 @@ int main(void)
 //====================================== END - Main method ============================================ //
 //====================================== Start - Interruptions ============================================ //
 
-ISR(INT2_vect) { // LEFT
+ISR(INT2_vect)
+{ // LEFT
   _delay_ms(100);
 
   switch (CURRENT_SCREEN) {
@@ -704,8 +756,8 @@ ISR(INT2_vect) { // LEFT
     case SCREEN_SAMPPLING:
       SAMPPLING += 1;
       break;
-    case SCREEN_WARN:
-    case SCREEN_WARN_TEMP:
+    case SCREEN_WARN_SMOKE:
+    case SCREEN_WARN_LIMIT:
       CURRENT_SCREEN = SCREEN_HOME;
       break;
     default:
@@ -716,7 +768,8 @@ ISR(INT2_vect) { // LEFT
   _delay_ms(100);
 }
 
-ISR(INT0_vect) { // CENTER
+ISR(INT0_vect)
+{ // CENTER
   _delay_ms(100);
 
   if (!test_bit(PIND, PD0)) return; // Botão pressionado
@@ -738,8 +791,8 @@ ISR(INT0_vect) { // CENTER
     case SCREEN_MAX_HUM:
     case SCREEN_SAMPPLING:
     case SCREEN_HUM:
-    case SCREEN_WARN:
-    case SCREEN_WARN_TEMP:
+    case SCREEN_WARN_SMOKE:
+    case SCREEN_WARN_LIMIT:
       CURRENT_SCREEN = SCREEN_HOME;
       break;
     case SCREEN_SETUP:
@@ -753,8 +806,8 @@ ISR(INT0_vect) { // CENTER
   _delay_ms(100);
 }
 
-
-ISR(INT1_vect) { // RIGHT
+ISR(INT1_vect)
+{ // RIGHT
   _delay_ms(100);
 
   switch (CURRENT_SCREEN) {
@@ -790,8 +843,8 @@ ISR(INT1_vect) { // RIGHT
     case SCREEN_SAMPPLING:
       if (SAMPPLING > 1) SAMPPLING -= 1;
       break;
-    case SCREEN_WARN:
-    case SCREEN_WARN_TEMP:
+    case SCREEN_WARN_SMOKE:
+    case SCREEN_WARN_LIMIT:
       CURRENT_SCREEN = SCREEN_HOME;
       break;
     default:
