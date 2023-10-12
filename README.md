@@ -2,8 +2,8 @@
 
 ## Project Components
 
-- [x] **Activating a 16x2 Liquid Crystal Display (LCD):** Explore details [here](./src/liquid_crystal_display.ino).
-- [x] **Capturing Data from the DHT22/11 Humidity and Temperature Sensor:**
+- [x] **Activating a 16x2 Liquid Crystal Display (LCD):** Explore details [here](./src/LCD/).
+- [x] **Capturing Data from the DHT22/11 Humidity and Temperature Sensor:** Explore details [here](./src/DHT/).
   - [x] Temperature measurement
   - [x] Humidity measurement
 - [x] **Control Buttons with Interrupts**
