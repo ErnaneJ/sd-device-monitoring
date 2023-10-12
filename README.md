@@ -13,11 +13,11 @@ For comprehensive project information, please refer to the [project's bidding do
 
 The proposal must be delivered in the form of a report, simulation, product presentation, implementation and budget, 1 (one) in Alecrim and 2 (two) online. Look here:
 
-- [commercial proposal](./doc/project/comercial_proposal);
-- [report](./doc/project/report/);
-- [budget](./doc/project/budget/):
-  - online;
-  - Alecrim;
-- [simulation](./doc/project/simulation/);
-- [product presentation](./doc/project/product/) ;
-- [implementation](./doc/project/implementation/);
+- [ ] [commercial proposal](./doc/project/comercial_proposal);
+- [ ] [report](./doc/project/report/);
+- [ ] [budget](./doc/project/budget/):
+  - [ ] online;
+  - [ ] Alecrim;
+- [x] [simulation](./doc/project/simulation/);
+- [ ] [product presentation](./doc/project/product/) ;
+- [x] [implementation](./doc/project/implementation/);
