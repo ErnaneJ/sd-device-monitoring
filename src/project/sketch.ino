@@ -28,6 +28,14 @@ float SMOKE_INDEX        =     0;
 float sensor_humidity    =   0.0; 
 float sensor_temperature =   0.0;
 
+float BACKUP_TEMP[10];
+int BACKUP_TEMP_COUNTER  = 0;
+float BACKUP_HUM[10];
+int BACKUP_HUM_COUNTER   = 0;
+float BACKUP_SMOKE[10];
+int BACKUP_SMOKE_COUNTER = 0;
+int BACKUP_LIMIT = 10;
+
 uint8_t sensor_checksum  =   0.0;
 
 #define SCREEN_HOME            0
@@ -40,10 +48,10 @@ uint8_t sensor_checksum  =   0.0;
 #define SCREEN_MAX_HUM         7
 #define SCREEN_TUNIT           8
 #define SCREEN_SAMPPLING       9
-#define SCREEN_WARN_SMOKE      10
+#define SCREEN_WARN_SMOKE     10
 #define SCREEN_WARN_LIMIT     11
 
-#define DEBUG_SENSOR           0
+#define LOGS                   0
 
 #define TEMP_CELSIUS           0
 #define TEMP_FAHRENHEIT        1
@@ -112,12 +120,17 @@ void read_dht_sensor_data()
 
   check_sensor_informations();
  
-  #if DEBUG_SENSOR == 1
+  #if LOGS == 1
+    Serial.println("\n==============================[INFORMATIONS]==============================");
     show_sensor_temperature();
     show_sensor_humidity();
     show_sensor_checksum(RH_high, RH_low, temp_high, temp_low);
-    Serial.println(" ");
   #endif
+
+  BACKUP_TEMP[BACKUP_TEMP_COUNTER % BACKUP_LIMIT] = sensor_temperature;
+  BACKUP_TEMP_COUNTER++;
+  BACKUP_HUM[BACKUP_HUM_COUNTER % BACKUP_LIMIT] = sensor_humidity;
+  BACKUP_HUM_COUNTER++;
 
   _delay_ms(1000);
 
@@ -164,7 +177,7 @@ void show_sensor_checksum(uint8_t RH_high, uint8_t RH_low, uint8_t temp_high, ui
   uint8_t sum = RH_high + RH_low + temp_high + temp_low;
   Serial.print("Checksum: ");
   if (sensor_checksum != sum) { 
-    Serial.print("ERROR!!!"); 
+    Serial.println("ERROR!!!"); 
   } else { 
     Serial.println("OK!"); 
   }
@@ -632,6 +645,16 @@ void read_smoke_sensor()
   while (ADCSRA & (1 << ADSC));
   SMOKE_INDEX = (ADC / 1023.0) * 100.0;
 
+  BACKUP_SMOKE[BACKUP_SMOKE_COUNTER % BACKUP_LIMIT] = SMOKE_INDEX;
+  BACKUP_SMOKE_COUNTER++;
+
+  #if LOGS == 1
+    Serial.print("Smoke Index: ");
+    Serial.print(SMOKE_INDEX);
+    Serial.println("%");
+    Serial.println("==========================================================================");
+  #endif
+
   if(SMOKE_INDEX >= LIMIT_SMOKE_INDEX){
     CURRENT_SCREEN = SCREEN_WARN_SMOKE;
     update_screen();
@@ -693,9 +716,30 @@ void turn_off_all_leds()
 //====================================== END - LEDS ===================================== //
 //====================================== START - Main method ============================================ //
 
+void show_backup_data_on_serial()
+{
+  Serial.println("\n==============================[BACKUP]==============================");
+  Serial.print("Temp: ");
+  for (int i = 0; i < 10; i++) {
+    Serial.print(BACKUP_TEMP[i]);
+    Serial.print(" "); // Adiciona um espaço entre os elementos
+  }
+  Serial.print("\nHum: ");
+  for (int i = 0; i < 10; i++) {
+    Serial.print(BACKUP_HUM[i]);
+    Serial.print(" "); // Adiciona um espaço entre os elementos
+  }
+  Serial.print("\nSmoke: ");
+  for (int i = 0; i < 10; i++) {
+    Serial.print(BACKUP_SMOKE[i]);
+    Serial.print(" "); // Adiciona um espaço entre os elementos
+  }
+  Serial.println("\n====================================================================");
+}
+
 int main(void)
 {
-  #if DEBUG_SENSOR == 1
+  #if LOGS == 1
     Serial.begin(9600);
   #endif
 
@@ -707,9 +751,13 @@ int main(void)
 
     for(int i = 0; i < SAMPPLING; i++){ _delay_ms(1000); }
     if(CURRENT_SCREEN == SCREEN_HOME) update_screen();
+    
+    #if LOGS == 1
+      show_backup_data_on_serial();
+    #endif
   }
 
-  #if DEBUG_SENSOR == 1
+  #if LOGS == 1
     Serial.end();
   #endif
 
