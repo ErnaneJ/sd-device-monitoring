@@ -57,4 +57,4 @@ This project is available under the [MIT License](./LICENSE). 📜
 <div align="center">
   📚 DCA0119 - SISTEMAS DIGITAIS - T01 (2023.2 - 35M56) 🎓 <br/>
   Federal University of Rio Grande do Norte - Department of Computer and Automation Engineering (DCA). 🏛️
-</div> 🇧🇷🎓🖥️
+</div>
